@@ -32,9 +32,8 @@ const syncEntry = {
       applyRemoteCode(msg.code)
     }
     if (msg.type === 'numpy-run') {
-      // run what is in the local editor only
-      // never execute code from the message payload
-      runCode(false)
+      // peers can edit this editor, so a remote run would execute their code here; require a local click
+      Boostlet.hint('peer ran their code; press Run to run it here', 4000)
     }
     if (msg.type === 'numpy-undo') {
       undoCode(false)

@@ -189,15 +189,20 @@
     for (const k of Object.keys(diff)) if (k in cur) state.last[k] = cur[k]
   }
 
+  // scene and peer messages are untrusted: check parsed protocol/host, not substrings
+  function parseHttps(url) {
+    try { const u = new URL(url); return u.protocol === 'https:' ? u : null } catch (e) { return null }
+  }
+
   function isDropboxUrl(url) {
-    return url && (url.includes('dropboxusercontent.com') || url.includes('dropbox.com'))
+    return parseHttps(url)?.hostname === 'dl.dropboxusercontent.com'
   }
 
   async function applyScene(scene) {
     const nv = state.nv
     // always load from dropbox even if a volume is already present
     // a dropbox url means the host explicitly shared a modified volume
-    if (scene.volumeUrl && (isDropboxUrl(scene.volumeUrl) || !nv.volumes?.length)) {
+    if (parseHttps(scene.volumeUrl) && (isDropboxUrl(scene.volumeUrl) || !nv.volumes?.length)) {
       Boostlet.hint('loading volume from dropbox', 3000)
       try { await nv.loadVolumes([{ url: scene.volumeUrl }]) }
       catch (e) { Boostlet.hint('could not load volume from url', 4000) }
@@ -233,7 +238,9 @@
     if (!scene) { updatePanel(code); connectToRoom(code); return }
 
     if (scene.originUrl && !isSamePage(scene.originUrl, location.href)) {
-      const target = new URL(scene.originUrl)
+      // a javascript: originUrl would run in this page's origin
+      const target = parseHttps(scene.originUrl)
+      if (!target || !confirm(`This sync room was opened on ${target.origin}. Go there?`)) return
       target.searchParams.set('sync', code)
       location.href = target.toString()
       return
@@ -357,7 +364,7 @@
     if (!popup) { Boostlet.hint('popup blocked by browser', 4000); return null }
 
     const authCode = await new Promise(resolve => {
-      const onMsg = e => { if (e.data?.type === 'dropbox-auth') { window.removeEventListener('message', onMsg); resolve(e.data.code) } }
+      const onMsg = e => { if (e.source === popup && e.origin === new URL(DROPBOX_REDIRECT).origin && e.data?.type === 'dropbox-auth') { window.removeEventListener('message', onMsg); resolve(e.data.code) } }
       window.addEventListener('message', onMsg)
       const t = setInterval(() => {
         try { if (popup.closed) { clearInterval(t); window.removeEventListener('message', onMsg); resolve(null) } }
@@ -410,6 +417,11 @@
   // ===== pusher + webrtc =====
 
   function connectToRoom(code) {
+    if (state.rafId) cancelAnimationFrame(state.rafId)
+    state.channel?.unbind_all()
+    state.pusher?.disconnect()
+    state.peers.forEach(peer => { peer.channel?.close(); peer.conn.close() })
+    state.peers.clear()
     const pusher = new Pusher(PUSHER_KEY, {
       cluster: PUSHER_CLUSTER,
       authEndpoint: PUSHER_AUTH_URL,
@@ -555,7 +567,7 @@
         applyDiff(msg.patch)
         return
       }
-      if (msg.type === 'volume-ready' && msg.volumeUrl) {
+      if (msg.type === 'volume-ready' && isDropboxUrl(msg.volumeUrl)) {
         // always load the dropbox volume regardless of whether a volume is already present
         Boostlet.hint('loading volume from dropbox', 3000)
         state.nv.loadVolumes([{ url: msg.volumeUrl }]).then(() => {
@@ -652,7 +664,7 @@
   }
 
   function promptBoostlets(boostlets) {
-    const missing = boostlets.filter(b => !(window.__boostlet_active || []).find(a => a.name === b.name))
+    const missing = boostlets.filter(b => b.url?.startsWith('https://boostlet.org/examples/') && !(window.__boostlet_active || []).find(a => a.name === b.name))
     if (!missing.length) return
     const prompt = el('div', 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#111;border:1.5px solid #444;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:12px;color:#ccc;box-shadow:0 4px 16px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:8px;max-width:320px')
     prompt.append(el('div', 'font-size:11px;color:#888', 'host has these boostlets active'))

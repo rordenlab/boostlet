@@ -92,18 +92,8 @@ export class Util {
 
   static async load_script(url, callback) {
 
-    if (typeof window.Object.global === 'undefined') {
-      // introducing hack to make it work for openneuro
-      // but only do it once
-      window.Object.defineProperty(window.Object.prototype, 'global', {
-        get( ){
-          return window;
-        },
-        set(newGlobal) {
-          globalThis = newGlobal;
-        }
-      });
-    }
+    // some libraries (e.g. on openneuro) expect a free `global`
+    window.global ??= window;
 
     const script = window.document.createElement("script")
     script.type = "text/javascript"
@@ -299,7 +289,7 @@ export class Util {
     hint.style.fontWeight = 'bold';
     hint.style.textAlign = 'center';
 
-    hint.innerHTML = message;
+    hint.textContent = message;
     
     window.document.body.appendChild(hint);
 

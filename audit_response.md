@@ -39,7 +39,7 @@ These are API or deletion decisions for the maintainers:
    - B: fix it once item 1 is decided.
    - Also, Cornerstone `select_box` is broken either way: BoxCraft is never loaded on that path.
 3. **Unify the adapters.** Make CanvasFallback the base class, so a framework supplies only `get_canvas()`/`get_rgba()`. This deletes `framework.js`, `xtk.js`, `papaya.js` and NiiVue's duplicated `set_image`/`set_mask`. Separately, flip 0.6 readback once in `get_image` and drop `flip_on_png`. Medium risk, covered by the sobel/plotly screenshots. Better as its own PR, after item 1.
-4. **The `Object.prototype.global` hack in `Util.load_script`.** It adds a getter to every object, and its setter reassigns `globalThis`. `window.global ??= window` resolves free `global` the same way. Not changed because the OpenNeuro case it was written for needs re-testing.
+4. ~~The `Object.prototype.global` hack~~: fixed in the security pass. Re-test OpenNeuro.
 5. **`Util.filter`.** It copies a buffer it then fully overwrites, and its top and bottom rows read out of bounds (NaN → 0). Fix by looping over interior rows only. Not changed: this is a hot loop and needs a before/after benchmark.
 6. **Hygiene.**
    - `package.json`: test tools (puppeteer, pixelmatch, pngjs, signale, cloudinary, live-server, @actions/core) belong in devDependencies, and chalk, cross-env and process are unused.
@@ -50,7 +50,32 @@ These are API or deletion decisions for the maintainers:
 
 ## Security pass
 
-Pending: the security/bug agent had not reported when this was written.
+The root cause behind several findings: `POST /scene` (`server/server.js`) stores any `sceneUrl` for any unclaimed code, and `examples/sync.js` trusts the scene JSON it points to. A code stays unclaimed if the host's Dropbox OAuth is blocked or declined, so scene contents and peer messages are attacker-controlled.
+
+**Fixed (client side, separate commit):**
+
+| Sev | Finding | Fix |
+|---|---|---|
+| P1 | `sync.js`: a scene `originUrl` of `javascript:…` was assigned to `location.href`, running script on the joiner's origin (verified in Node). An `https:` value was an open redirect. | Allow `https:` only, and confirm before navigating to the other origin. |
+| P1 | Hugging Face token committed | Removed (see above); **revoke it**. The rest of the secret scan is clean: Pusher and Dropbox keys are public client keys, server secrets come from env, and the `AKIA…` hits are base64 inside minified test libraries. |
+| P2 | `numpyBoostlet.js`: a peer could `numpy-edit` the editor and then `numpy-run` it, executing their code on every peer | A remote run now only shows a hint; running requires a local click. |
+| P2 | `sync.js` `promptBoostlets`: one click loaded any scene-supplied script URL (only the name was shown) | Only `https://boostlet.org/examples/` URLs are offered. |
+| P2 | `Util.load_script`: the `Object.prototype.global` setter reassigned `globalThis` on any `obj.global = x` in the host page, and could not be undone | Replaced with `window.global ??= window`. Still needs a re-test on OpenNeuro, the case it was written for. |
+| P2 | `sync.js`: peers could make everyone load any volume URL. `isDropboxUrl` was a substring check (`https://evil/x?dropbox.com` passed) | Parsed check: `https:` and host `dl.dropboxusercontent.com` for `volume-ready`; the scene's `volumeUrl` must be `https:`. |
+| P2 | `sync.js`: joining from the host panel left the first Pusher connection, its peers and its animation-frame loop running | `connectToRoom` tears the previous connection down first. |
+| P3 | `sync.js`: the OAuth `message` listener accepted any window | Requires `e.source === popup` and the redirect origin. |
+| P3 | `Util.hint` and `webllm.js` put remote text into `innerHTML` | `textContent`. |
+
+**Open: server/infrastructure (not changed; needs the worker's owner to deploy):**
+- `POST /scene`: no size cap or rate limit; invalid JSON returns a 500 without CORS; `sceneUrl` should be limited to `https://dl.dropboxusercontent.com/…`.
+- Old token-less entries can be taken over, and 5-character codes are still accepted.
+- The auth endpoint signs any channel and any caller-chosen `user_id`, and clients trust `from` in signalling payloads. Fix: restrict `channel_name` to `presence-boostlet-[a-z0-9]{5,32}`, set `user_id = socket_id`, and have the client use `metadata.user_id`.
+- The auth worker (`bronsdonayden.workers.dev`) and the OAuth redirect (`bronsdonayden.github.io`) live on a contributor's accounts. Move both to an origin the project owns.
+- Privacy: volumes and scenes are uploaded as public Dropbox links, and `originUrl` carries the full query string (possibly signed tokens). Warn before upload, and strip or allowlist query parameters.
+- `sync.js` polls `Boostlet.init()` every 300 ms forever on non-NiiVue pages. Cap the attempts.
+- The 1.0 breakage of sync, PixelExplorer and roiStats is already tracked under NiiVue porting.
+
+No problems were found in `volume_data`, the `Boostlet.init('niivue', nv)` path, or room-code entropy (about 52 bits).
 
 ## Verification
 
