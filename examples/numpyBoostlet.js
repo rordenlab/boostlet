@@ -62,6 +62,13 @@ boostletScript.onload = function() {
 };
 document.head.appendChild(boostletScript);
 
+// re-render after editing volumes[0].img in place. NiiVue 1.0 caches textures by buffer
+// identity, so it needs isDirty to notice; 0.6 ignores the flag.
+function refreshVolume() {
+  Boostlet.nv.volumes[0].isDirty = true;
+  Boostlet.nv.updateGLVolume();
+}
+
 async function setup() {
   if (Boostlet.framework.name !== 'niivue') {
     alert('numpyBoostlet only supports niivue');
@@ -86,7 +93,7 @@ async function setup() {
     const vol = Boostlet.nv.volumes[0];
     const src = (arr && arr.data) ? arr.data : arr;
     vol.img.set(src);
-    Boostlet.nv.updateGLVolume();
+    refreshVolume();
   };
 
   // load ace then build the editor panel
@@ -145,7 +152,7 @@ async function setup() {
       const _snap = vol.img.slice()
       const undoTimes = []
       for (let i = 0; i < nRuns; i++) {
-        const t0 = performance.now(); vol.img.set(_snap); Boostlet.nv.updateGLVolume(); undoTimes.push(performance.now() - t0)
+        const t0 = performance.now(); vol.img.set(_snap); refreshVolume(); undoTimes.push(performance.now() - t0)
       }
 
       // 5. threshold script from figure 3, max 5 runs, restores volume each time
@@ -172,7 +179,7 @@ async function setup() {
         await new AsyncFn(thresholdScript)()
         threshTimes.push(performance.now() - t0)
       }
-      vol.img.set(_orig); Boostlet.nv.updateGLVolume()
+      vol.img.set(_orig); refreshVolume()
 
       const table = {
         'to_np':            stats(toNpTimes),
@@ -229,7 +236,7 @@ function undoCode(broadcastUndo) {
   if (broadcastUndo === undefined) broadcastUndo = true;
   if (!window._numpySnapshot) return;
   Boostlet.nv.volumes[0].img.set(window._numpySnapshot);
-  Boostlet.nv.updateGLVolume();
+  refreshVolume();
   window._numpySnapshot = null;
   document.getElementById('nb-output').innerHTML = '<span style="color:#aaa">undo applied</span>';
   if (broadcastUndo && typeof window.__sync_send === 'function') {

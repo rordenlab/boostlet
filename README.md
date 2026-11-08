@@ -61,10 +61,12 @@ All methods are on the global `Boostlet`.
 | Method | Description |
 |---|---|
 | `init(name?, instance?)` | Detect the framework. `init('niivue', nv)` passes a NiiVue instance explicitly. |
-| `get_image(raw?)` | Current 2D view as grayscale `{data, width, height}`. On NiiVue, `get_image(true)` returns raw voxels of the current slice. |
+| `get_image(raw?)` | Current 2D view as grayscale `{data, width, height}`. On NiiVue, `get_image(true)` returns raw voxels of the current slice (whole volume in multiplanar/render). |
 | `set_image(pixels)` | Draw grayscale pixels back onto the view. |
 | `set_mask(mask)` | Overlay a 2D mask. |
 | `select_box(callback)` | Let the user drag a region-of-interest box. |
+| `on_location(callback)` | NiiVue: `callback(location)` on every crosshair move and once immediately; `location.vox` is in RAS voxels. |
+| `slice_type()` | NiiVue: 0 axial, 1 coronal, 2 sagittal, 3 multiplanar, 4 render. |
 | `get_dims()` | NiiVue: `[width, height, 1]` of the current slice. |
 | `get_subvolume(start, end)` | NiiVue: raw voxels `{data, dims}` in RAS voxel coords, end inclusive, clamped. |
 | `filter(pixels, width, height, kernel)` | Square-kernel convolution (e.g. 3×3). |
@@ -82,7 +84,7 @@ All methods are on the global `Boostlet`.
 - XTK
 - Any other page: falls back to the largest `<canvas>`.
 
-NiiVue is detected on `window` (e.g. `window.nv`). ES module pages, typical for NiiVue 1.0, keep the instance off `window`; pass it explicitly with `Boostlet.init('niivue', nv)`. Some examples (brainchop, sync, PixelExplorer, roiStats, numpyBoostlet, meshAR, fibersAR, trako) still use NiiVue 0.6 internals and do not yet work on 1.0.
+NiiVue is detected on `window` (e.g. `window.nv`) or from a `<niivue-viewer>`/`<niivue-scene>` web component. Other ES module pages, typical for NiiVue 1.0, keep the instance private; pass it explicitly with `Boostlet.init('niivue', nv)`. brainchop, sync and trako still use NiiVue 0.6 internals and do not yet work on 1.0.
 
 ## Developer Instructions
 
@@ -93,7 +95,7 @@ npm run dev                   # live-server on :5501
 npm test                      # puppeteer screenshots vs tests/scripts/images/GroundTruth_*.png
 ```
 
-To prototype in the JS console: `tests/dev.html` uses the uncompiled source, `tests/dist.html` the compiled build. Example scripts and most test pages load the production build from boostlet.org, not your local `dist/`. See [tests/README.md](tests/README.md).
+To prototype in the JS console: `tests/dev.html` uses the uncompiled source, `tests/dist.html` the compiled build. Example scripts load the production build from boostlet.org; the NiiVue test pages run them against your local `dist/` instead (`tests/niivue/js/local_example.js`), so build first. See [tests/README.md](tests/README.md).
 
 ## Contributing
 

@@ -44,45 +44,36 @@ export class Util {
 
     let framework = null;
 
-    // fast path: check known names first
-    if (Util.looks_like_niivue(window.nv)) {
+    // known names, then NiiVue web components (they expose the instance even on ES module pages),
+    // then the slow scan of window for anything that structurally matches niivue
+    const element = window.document.querySelector('niivue-viewer, niivue-scene');
+    const element_nv = element && (element.nv ?? element.scene?.getNiivue(0));
+    const found = [window.nv, window.niivue, element_nv].find(Util.looks_like_niivue) || Util.scan_window_for_niivue();
 
-      framework = new NiiVue(window.nv);
+    if (found) {
 
-    } else if (Util.looks_like_niivue(window.niivue)) {
+      framework = new NiiVue(found);
 
-      framework = new NiiVue(window.niivue);
+    } else if (Util.is_defined(window.cornerstone)) {
+
+      framework = new Cornerstone2D(window.cornerstone);
+
+    } else if (Util.is_defined(window.r)) {
+
+      framework = new Xtk(window.r);
+
+    } else if (Util.is_defined(window.OpenSeadragon)) {
+
+      framework = new OpenSeaDragon(window.OpenSeadragon);
+
+    } else if (Util.is_defined(window.papayaContainers)) {
+
+      framework = new Papaya(window.papayaContainers)
 
     } else {
 
-      // this is the slow path which scans window for any object that structurally matches niivue
-      const found = Util.scan_window_for_niivue()
-      if (found) {
-
-        framework = new NiiVue(found);
-
-      } else if (Util.is_defined(window.cornerstone)) {
-
-        framework = new Cornerstone2D(window.cornerstone);
-
-      } else if (Util.is_defined(window.r)) {
-
-        framework = new Xtk(window.r);
-
-      } else if (Util.is_defined(window.OpenSeadragon)) {
-
-        framework = new OpenSeaDragon(window.OpenSeadragon);
-
-      } else if (Util.is_defined(window.papayaContainers)) {
-
-        framework = new Papaya(window.papayaContainers)
-
-      } else {
-
-        console.log("No framework detected, falling back to canvas rendering");
-        framework = new CanvasFallback();
-
-      }
+      console.log("No framework detected, falling back to canvas rendering");
+      framework = new CanvasFallback();
 
     }
 

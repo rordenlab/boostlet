@@ -49,6 +49,18 @@ export class NiiVue extends Framework {
     return this.v1 ? this.instance.crosshairPos : this.instance.scene.crosshairPos;
   }
 
+  // callback(location) on every crosshair move, and once now; location.vox is in RAS voxels
+  on_location(callback) {
+    const nv = this.instance;
+    if (this.v1) {
+      nv.addEventListener('locationChange', e => callback(e.detail));
+    } else {
+      const previous = nv.onLocationChange;
+      nv.onLocationChange = loc => { previous?.(loc); callback(loc); };
+    }
+    nv.createOnLocationChange();
+  }
+
   get_image(from_canvas) {
 
     if (Util.is_defined(from_canvas)) {

@@ -39,60 +39,35 @@ function setup(nv) {
   // create the panel once
   plot();
 
-  // save the existing onLocationChange so we don't clobber it
-  const existingOnLocationChange = nv.onLocationChange;
+  // fires on every crosshair move / slice change, and once now so the panel fills on load
+  Boostlet.on_location(function(loc) {
+    if (!nv.volumes.length) return;
 
-  // hook into location change — fires on every crosshair move / slice change
-  // fire once immediately so the panel is populated on load without requiring a click
-  const triggerUpdate = function(loc) {
-    if (existingOnLocationChange) existingOnLocationChange(loc);
-
-    if (!nv.volumes || !nv.volumes.length) return;
-
-    const v = [Math.round(loc.vox[0]), Math.round(loc.vox[1]), Math.round(loc.vox[2])];
-
-    const start = [v[0] - HALF, v[1] - HALF, v[2] - HALF];
-    const end   = [v[0] + HALF, v[1] + HALF, v[2] + HALF];
-
-    // collapse the axis perpendicular to the current slice to a single voxel
-    // 2 = sagittal (x axis), 1 = coronal (y axis), default axial (z axis)
-    const fixedAxis = nv.opts.sliceType === 2 ? 0
-                    : nv.opts.sliceType === 1  ? 1 : 2;
-    start[fixedAxis] = end[fixedAxis] = Math.round((start[fixedAxis] + end[fixedAxis]) / 2);
+    // get_subvolume rounds and clamps; collapse the axis perpendicular to the slice
+    // (axial z, coronal y, sagittal x). In multiplanar, axCorSag is the clicked tile; else axial.
+    const start = loc.vox.map(x => x - HALF), end = loc.vox.map(x => x + HALF);
+    const axis = [2, 1, 0][loc.axCorSag >= 0 ? loc.axCorSag : Boostlet.slice_type()] ?? 2;
+    start[axis] = end[axis] = loc.vox[axis];
 
     const { data, dims } = Boostlet.get_subvolume(start, end);
-    if (data && dims) {
-      const mc = document.getElementById('PixelExplorerCanvas');
-      if (mc) drawMatrix(data, dims, mc);
-    }
-  };
-
-  nv.onLocationChange = triggerUpdate;
-
-  // make a loc object from current crosshair state so the panel fills immediately
-  const pos = nv.scene.crosshairPos;
-  const dims = nv.volumes[0].dims;
-  // floor matches how niivue maps crosshair position to a voxel
-  const initialVox = [
-    Math.min(Math.floor(pos[0] * dims[1]), dims[1] - 1),
-    Math.min(Math.floor(pos[1] * dims[2]), dims[2] - 1),
-    Math.min(Math.floor(pos[2] * dims[3]), dims[3] - 1)
-  ];
-  triggerUpdate({ vox: initialVox });
+    const mc = document.getElementById('PixelExplorerCanvas');
+    if (mc) drawMatrix(data, dims, mc);
+  });
 }
 
 // render voxel values as a labeled grayscale grid
 function drawMatrix(data, dims, mc) {
-  const nv = Boostlet.framework.instance;
-  const { cal_min, cal_max } = nv.volumes[0];
+  const vol = Boostlet.framework.instance.volumes[0];
+  const cal_min = vol.cal_min ?? vol.calMin; // 0.6 ?? 1.0
+  const cal_max = vol.cal_max ?? vol.calMax;
   const range = cal_max - cal_min || 1;
   const ctx = mc.getContext('2d');
 
   // apply nifti slope/intercept to convert raw values to display values.
   // raw voxel values can be stored in arbitrary units (e.g. large negatives like -9000)
   // and need to be scaled to match what NiiVue actually displays: display_value = raw * slope + inter
-  const slope = nv.volumes[0].hdr.scl_slope || 1;
-  const inter = nv.volumes[0].hdr.scl_inter || 0;
+  const slope = vol.hdr.scl_slope || 1;
+  const inter = vol.hdr.scl_inter || 0;
 
   // getVolumeData returns dims as X Y Z and the collapsed axis has size 1
   // the first non-1 dim is cols, second is rows

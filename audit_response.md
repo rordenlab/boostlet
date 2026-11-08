@@ -81,3 +81,32 @@ No problems were found in `volume_data`, the `Boostlet.init('niivue', nv)` path,
 
 - Rebuilt `dist/boostlet.min.js`. Headless Chrome (system Chrome via puppeteer-core): 0.6 vs 1.0 slices and subvolumes are bit-identical, crosshair hiding holds, click-restore works, and the bounded round trips above pass.
 - The canvas-fallback change is covered by the papaya/xtk/osd sobel pages. Those load production dist from boostlet.org, so they don't exercise this branch until it is deployed.
+
+## Audit 2 (easy NiiVue 1.0 fixes, before commit)
+
+**External review (`audit_temp.md`, deleted):** no actionable findings. Its notes:
+- The roiStats 49-pixel difference was within tolerance. With the loader change below, all four 1.0 pages now match exactly.
+- The fixed 5 s `TESTCOMPLETED` timer is acknowledged. The runner then waits another 30 s, so a slow CDN would need more than 35 s to break it. Left as is.
+
+**Agents. Fixed:**
+
+| Sev | Finding | Fix |
+|---|---|---|
+| P0 | `numpyBoostlet.js`: making `refreshVolume` local (refactor pass) put it out of scope for the top-level `undoCode`, so Undo threw `ReferenceError` | Moved to module scope. |
+| P1 | The 0.6 `pixelexplorer`/`roistats` test pages ran the examples against boostlet.org's production build, which has no `on_location`, so they would fail until deploy | New `tests/niivue/js/local_example.js`, used by every NiiVue test page: it waits for `window.nv` to hold a volume, then runs the example against local `/dist`. Waiting also removes a race where sobel ran on the loading screen. |
+| P3 | Multiplanar views always sampled the axial plane | Use `loc.axCorSag` (the clicked tile) when set. |
+| P3 | `fibersAR` copied `trx.vertices` | Uses it directly; 0.6 still wraps `pts`. |
+| — | Refactor: duplicated slab code, dead `Math.round`/empty-data checks, `nv.volumes[0]` lookups, meshAR 0–255 round trip | Trimmed. `get_subvolume` already rounds and clamps. |
+
+**Not changed (YAGNI or pre-existing):**
+- `on_location` has no unsubscribe (examples guard re-runs with `window._XLoaded`).
+- Detection checks only the first `niivue-viewer`/`niivue-scene` with the default tag names.
+- `createOnLocationChange()` fires the host's own location handlers once, which is benign.
+- numpy's benchmark timings don't await 1.0's async `updateGLVolume`.
+- The `example` parameter in the test page can only fetch same-origin `/examples/*.js`.
+
+**Verification:** all 9 NiiVue screenshot configs, mirroring the runner (800×1200, 30 s settle, pixelmatch threshold 0.1, 5% rule) on the local build:
+- 1.0 `sobel_v1`, `sobel_v1_bounds`, `pixelexplorer_v1`, `roistats_v1`: 0 differing pixels.
+- 0.6 `sobel` 3.23%, `plotly` 0.17%, `subvolume` 0.05%, `pixelexplorer` 2.45%, `roistats` 0.23%: all pass.
+- At HEAD on this Mac, the 0.6 pages using the production build didn't even load their volume headlessly. Their byte-exact mismatch is environmental (the ground truths come from CI).
+- Behaviour checks: on 1.0, roiStats updates on crosshair moves, the dirty-flag refresh works, and web-component detection works; on 0.6, PixelExplorer and roiStats work with the local build.

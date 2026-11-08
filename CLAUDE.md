@@ -7,7 +7,7 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - `src/index.js`: entry; sets `window.Boostlet`.
 - `src/boostlet.js`: public API; delegates to `this.framework`.
 - `src/framework.js`: adapter base class (`get_image`, `set_image`, `set_mask`, `select_box`, `convert_to_png`).
-- `src/util.js`: framework detection (`window.nv`/`window.niivue` → window scan for NiiVue → cornerstone → `window.r` XTK → OpenSeadragon → `papayaContainers` → canvas fallback), filter, PNG, grayscale/RGBA, hint.
+- `src/util.js`: framework detection (`window.nv`/`window.niivue` → `<niivue-viewer>.nv` / `<niivue-scene>.scene.getNiivue(0)` → window scan for NiiVue → cornerstone → `window.r` XTK → OpenSeadragon → `papayaContainers` → canvas fallback), filter, PNG, grayscale/RGBA, hint.
 - `src/frameworks/niivue.js`: NiiVue 0.6 + 1.0 adapter; `volume_data()` RAS voxel reader.
 - `src/frameworks/cornerstone2d.js`, `openseadragon.js`: native adapters.
 - `src/frameworks/papaya.js`, `xtk.js`: thin wrappers over `canvasFallback.js` (largest `<canvas>`, 2D).
@@ -27,7 +27,8 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - Dev server: `npm run dev` (live-server :5501). Test pages use `http://127.0.0.1:5501/...`.
 - `npm test`: puppeteer 21 fails under Node 26 (yargs ESM error), and puppeteer's Chrome download postinstall is blocked by npm allow-scripts. Workaround: puppeteer-core + system Chrome (`executablePath`).
 - Runner waits for `window.TESTCOMPLETED === true`, sleeps 30 s, screenshots to `tests/scripts/images/Test_<date>_<Framework>_<type>.png` (gitignored), pixelmatches against ground truth.
-- Examples and most test pages load production dist from boostlet.org, so they test production, not your build. `tests/niivue/sobel_v1.html` loads local `/dist`.
+- Examples load production dist from boostlet.org. NiiVue test pages run them through `tests/niivue/js/local_example.js`: it waits for `window.nv` to hold a volume, then runs `examples/<name>.js` with the boostlet.org URL rewritten to local `/dist` (so build first). OpenSeaDragon/Papaya/XTK pages still load production.
+- 0.6 NiiVue ground truths were made in CI and don't reproduce byte-exactly on macOS; with the local build they pass the runner's 5% pixelmatch rule (0.05–3.2%). 1.0 pages match exactly.
 
 ## Conventions
 
@@ -43,25 +44,29 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - `get_image()`: 1.0 uses `getCanvasImage()` (WebGL2 and WebGPU), crosshair hidden via `crosshairWidth = 0`, top-left origin, no flip. 0.6 uses `gl.readPixels` (bottom-up, `flip_on_png`).
 - `get_image(true)`, `get_subvolume(start, end)`: `volume_data()`, a port of 0.6 `NVImage.getVolumeData` (removed in 1.0). RAS voxel coords, end inclusive, clamped. Reads `dimsRAS`, `img2RASstart`, `img2RASstep`, `img` (present in both).
 - 1.0 bounded views (`setBounds`): `get_image` returns only the instance's rect; it stores `this.capture = {x, y, width, height}` (from `nv.view.boundsOffsetX/Y`, top-left canvas px) and `set_image` pastes back there. Outside the rect the overlay canvas is transparent.
-- Tested: 1.0.0-rc.118. `tests/niivue/sobel_v1.html` (`?bounds=x0,y0,x1,y1` calls `setBounds`); config types `sobel_v1`, `sobel_v1_bounds`.
-- Not ported (use 0.6 internals): brainchop_runner, sync, PixelExplorer, roiStats, numpyBoostlet, meshAR/fibersAR, trako. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
+- Tested: 1.0.0-rc.118 via `tests/niivue/v1.html?example=<name>&bounds=x0,y0,x1,y1`: runs the real `examples/<name>.js` (default sobel) via `local_example.js`; sets `TESTCOMPLETED` after a fixed 5 s (the runner then waits 30 s more). Config types `sobel_v1`, `sobel_v1_bounds`, `pixelexplorer_v1`, `roistats_v1`.
+- `on_location(cb)`: 1.0 `addEventListener('locationChange', e => cb(e.detail))`; 0.6 chains `onLocationChange`; then `createOnLocationChange()` fires once. `slice_type()` exposed on Boostlet.
+- Examples ported to both versions: PixelExplorer, roiStats (`on_location`, `slice_type`; PixelExplorer also `cal_min ?? calMin`), numpyBoostlet (`Boostlet.refresh_volume()` sets `isDirty`), meshAR (`positions ?? pts`, `indices ?? tris`, `color` 0–1), fibersAR (`trx.offsets/vertices ?? offsetPt0/pts`).
+- Not ported (use 0.6 internals): brainchop_runner, sync, trako. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
 - Trap: in-place `vol.img` edits + `updateGLVolume()` silently do nothing on 1.0 (textures cached by buffer identity); set `vol.isDirty = true` or call `updateVolumeData(i)`.
 
 ## Next steps
 
-From niivue-parity.md:
+Next pass ("medium", agreed 2026-11-08):
+1. sync on 1.0: `Boostlet.slice_type()` plus a `crosshair_pos()` accessor, `setVolume(i, {colormap})` instead of `setColormap`, `change` events instead of per-frame polling, `saveVolume` bytes instead of the hand-written NIfTI writer. Needs a two-browser test.
+2. brainchop on `@brainchop/mindgrab`: a `get_nifti()` helper (1.0 `saveVolume({volumeByIndex: 0, filename: ''})`, 0.6 `saveImage`) → `segment` → `addVolume({url: new File(...)})`. Risks: `worker: true` cross-origin worker from a CDN inside a host page; WebGPU needs https; the CPU fallback needs host COOP/COEP.
 
-1. Merge this branch (core API + capture on 1.0).
-2. NiiVue core: `canvas.niivue = this` (R1) and RAS voxel helpers `getVolumeData`/`setVolumeData`/`rasToIndex` (R2). Then detect via `canvas.niivue` before the window scan, and drop `volume_data()`.
-3. Port PixelExplorer, roiStats (`locationChange` event, `nv.sliceType`, `nv.crosshairPos`), numpyBoostlet (dirty flag).
-4. Rewrite brainchop on `@brainchop/mindgrab`: `saveVolume` → `segment` → `addVolume`.
-5. Port sync to `change` events; `saveVolume` replaces the hand-written NIfTI writer.
-6. meshAR/fibersAR: `positions`/`indices`/`color` (0–1). trako: `addMesh({url})`.
+Later:
+- NiiVue core (niivue-parity.md R1/R2): `canvas.niivue`, RAS voxel helpers. Then detect via `canvas.niivue` and drop `volume_data()`.
+- trako (0.6 mesh template + `window.niivue`); imageCaptioning on NiiVue (blocked on the `get_image(true)` decision).
+- Audit open items below.
 
 ## Audit notes
 
 2026-11-08 audit (details: `audit_response.md`):
 - Fixed: 1.0 bounded-view round trip; leaked HF token removed from `examples/imageCaptioning.js` (still in history from `3f50bf3` → owner must revoke); dead Segment Anything example (backend 404) removed; small dead-code cleanups.
-- Open, needs maintainer decision: `get_image(true)` means raw voxels on NiiVue but canvas RGBA elsewhere (breaks imageCaptioning on NiiVue); NiiVue `set_mask` throws since `63b4da3` (fix vs delete mask/box/BoxCraft path); unify adapters on CanvasFallback; `Object.prototype.global` hack; `Util.filter` OOB reads (benchmark first); package.json dep hygiene; stale `server/package.json`, `tests/dev.html`.
+- Open, needs maintainer decision: `get_image(true)` means raw voxels on NiiVue but canvas RGBA elsewhere (breaks imageCaptioning on NiiVue); NiiVue `set_mask` throws since `63b4da3` (fix vs delete mask/box/BoxCraft path); unify adapters on CanvasFallback; `Util.filter` OOB reads (benchmark first); package.json dep hygiene; stale `server/package.json`, `tests/dev.html`.
 - Never commit API tokens in examples; ask at run time (don't store: bookmarklet storage belongs to the host page).
 - Security pass fixed client side (sync URL and protocol checks, OAuth popup check, numpy remote-run, boostlet URL allowlist, `global` hack, `hint` textContent). Open: server `/scene` validation and limits, Pusher auth channel/user_id, infrastructure on a contributor's accounts, Dropbox privacy. Treat sync scene JSON and peer messages as untrusted.
+- 2026-11-08 audit 2: external review of easy fixes had no actionable findings
+- 2026-11-08 audit 2 agents: fixed numpy `refreshVolume` scope (Undo threw), NiiVue test pages now test the local build (were testing production, which lacks `on_location`), multiplanar uses the clicked tile (`loc.axCorSag`), slab code trimmed, meshAR colour in 0–1, fibersAR no longer copies `trx.vertices`. Not done (YAGNI): `on_location` unsubscribe; detection only checks the first default-named web component; numpy bench timings don't await 1.0's async `updateGLVolume`.

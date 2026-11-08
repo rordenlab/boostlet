@@ -41,39 +41,20 @@ async function setup(nv) {
   // load numpy-ts directly no boostlet wrapper needed
   const np = await import(NUMPY_TS_URL);
 
-  const existingOnLocationChange = nv.onLocationChange;
+  // fires on every crosshair move / slice change, and once now so the panel fills on load
+  Boostlet.on_location(function(loc) {
+    if (!nv.volumes.length) return;
 
-  const triggerUpdate = async function(loc) {
-    if (existingOnLocationChange) existingOnLocationChange(loc);
-    if (!nv.volumes || !nv.volumes.length) return;
-
-    const v = [Math.round(loc.vox[0]), Math.round(loc.vox[1]), Math.round(loc.vox[2])];
-
-    const start = [v[0] - HALF, v[1] - HALF, v[2] - HALF];
-    const end   = [v[0] + HALF, v[1] + HALF, v[2] + HALF];
-
-    const fixedAxis = nv.opts.sliceType === 2 ? 0
-                    : nv.opts.sliceType === 1  ? 1 : 2;
-    start[fixedAxis] = end[fixedAxis] = Math.round((start[fixedAxis] + end[fixedAxis]) / 2);
+    // get_subvolume rounds and clamps; collapse the axis perpendicular to the slice
+    // (axial z, coronal y, sagittal x). In multiplanar, axCorSag is the clicked tile; else axial.
+    const start = loc.vox.map(x => x - HALF), end = loc.vox.map(x => x + HALF);
+    const axis = [2, 1, 0][loc.axCorSag >= 0 ? loc.axCorSag : Boostlet.slice_type()] ?? 2;
+    start[axis] = end[axis] = loc.vox[axis];
 
     const { data } = Boostlet.get_subvolume(start, end);
-    if (!data || data.length === 0) return;
 
-    const result = computeStats(np, data, nv.volumes[0]);
-    updatePanel(result);
-  };
-
-  nv.onLocationChange = triggerUpdate;
-
-  // fire immediately so panel populates on load
-  const pos = nv.scene.crosshairPos;
-  const dims = nv.volumes[0].dims;
-  // floor matches how niivue maps crosshair position to a voxel
-  triggerUpdate({ vox: [
-    Math.min(Math.floor(pos[0] * dims[1]), dims[1] - 1),
-    Math.min(Math.floor(pos[1] * dims[2]), dims[2] - 1),
-    Math.min(Math.floor(pos[2] * dims[3]), dims[3] - 1)
-  ]});
+    updatePanel(computeStats(np, data, nv.volumes[0]));
+  });
 }
 
 // write computed stats into the panel dom elements

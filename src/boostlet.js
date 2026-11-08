@@ -111,6 +111,21 @@ export class Boostlet {
 
   }
 
+  /**
+   * NiiVue: callback(location) on every crosshair move, and once immediately.
+   * location.vox is the crosshair in RAS voxel coords (as get_subvolume takes).
+   */
+  on_location(callback) {
+    return this.framework.on_location(callback);
+  }
+
+  /**
+   * NiiVue: 0 axial, 1 coronal, 2 sagittal, 3 multiplanar, 4 render.
+   */
+  slice_type() {
+    return this.framework.slice_type();
+  }
+
   get_dims() {
     return this.framework.get_dims();
   }
