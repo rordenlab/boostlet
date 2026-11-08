@@ -27,7 +27,7 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - Dev server: `npm run dev` (live-server :5501). Test pages use `http://127.0.0.1:5501/...`.
 - `npm test`: puppeteer 21 fails under Node 26 (yargs ESM error), and puppeteer's Chrome download postinstall is blocked by npm allow-scripts. Workaround: puppeteer-core + system Chrome (`executablePath`).
 - Runner waits for `window.TESTCOMPLETED === true`, sleeps 30 s, screenshots to `tests/scripts/images/Test_<date>_<Framework>_<type>.png` (gitignored), pixelmatches against ground truth.
-- Examples load production dist from boostlet.org. NiiVue test pages run them through `tests/niivue/js/local_example.js`: it waits for `window.nv` to hold a volume, then runs `examples/<name>.js` with the boostlet.org URL rewritten to local `/dist` (so build first). OpenSeaDragon/Papaya/XTK pages still load production.
+- Examples load production dist from boostlet.org. NiiVue test pages run them through `tests/niivue/js/local_example.js`: it waits for `window.nv` to hold a volume, then runs `examples/<name>.js` with every `https://boostlet.org/` URL rewritten to the local server (dist and helper examples such as `brainchop_runner.js`; so build first). OpenSeaDragon/Papaya/XTK pages still load production.
 - 0.6 NiiVue ground truths were made in CI and don't reproduce byte-exactly on macOS; with the local build they pass the runner's 5% pixelmatch rule (0.05–3.2%). 1.0 pages match exactly.
 
 ## Conventions
@@ -44,17 +44,18 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - `get_image()`: 1.0 uses `getCanvasImage()` (WebGL2 and WebGPU), crosshair hidden via `crosshairWidth = 0`, top-left origin, no flip. 0.6 uses `gl.readPixels` (bottom-up, `flip_on_png`).
 - `get_image(true)`, `get_subvolume(start, end)`: `volume_data()`, a port of 0.6 `NVImage.getVolumeData` (removed in 1.0). RAS voxel coords, end inclusive, clamped. Reads `dimsRAS`, `img2RASstart`, `img2RASstep`, `img` (present in both).
 - 1.0 bounded views (`setBounds`): `get_image` returns only the instance's rect; it stores `this.capture = {x, y, width, height}` (from `nv.view.boundsOffsetX/Y`, top-left canvas px) and `set_image` pastes back there. Outside the rect the overlay canvas is transparent.
-- Tested: 1.0.0-rc.118 via `tests/niivue/v1.html?example=<name>&bounds=x0,y0,x1,y1`: runs the real `examples/<name>.js` (default sobel) via `local_example.js`; sets `TESTCOMPLETED` after a fixed 5 s (the runner then waits 30 s more). Config types `sobel_v1`, `sobel_v1_bounds`, `pixelexplorer_v1`, `roistats_v1`.
+- Tested: 1.0.0-rc.118 via `tests/niivue/v1.html?example=<name>&bounds=x0,y0,x1,y1`: runs the real `examples/<name>.js` (default sobel) via `local_example.js`; `?data=<url>` picks the volume (default `data/avf.nii.gz`); sets `TESTCOMPLETED` after a fixed 5 s (the runner then waits 30 s more). Config types `sobel_v1`, `sobel_v1_bounds`, `pixelexplorer_v1`, `roistats_v1`.
 - `on_location(cb)`: 1.0 `addEventListener('locationChange', e => cb(e.detail))`; 0.6 chains `onLocationChange`; then `createOnLocationChange()` fires once. `slice_type()` exposed on Boostlet.
 - Examples ported to both versions: PixelExplorer, roiStats (`on_location`, `slice_type`; PixelExplorer also `cal_min ?? calMin`), numpyBoostlet (`Boostlet.refresh_volume()` sets `isDirty`), meshAR (`positions ?? pts`, `indices ?? tris`, `color` 0–1), fibersAR (`trx.offsets/vertices ?? offsetPt0/pts`).
-- Not ported (use 0.6 internals): brainchop_runner, sync, trako. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
+- sync (both versions): reads via `Boostlet.framework.crosshair_pos()` / `Boostlet.slice_type()` / `cal_min ?? calMin`; 1.0 writes via `nv.crosshairPos =`, `nv.sliceType =`, `nv.setVolume(0, {colormap, calMin, calMax})`; uploads use NiiVue's own NIfTI (`saveVolume` / 0.6 `saveImage`, `filename: ''`). Change detection is still per-frame `requestAnimationFrame` polling (one path for both versions; paused in background tabs). Detection poll gives up after ~30 s.
+- brainchop (both versions): `brainchop_runner.js` uses `@brainchop/mindgrab` from jsdelivr (`segment`, `worker: false` since a CDN module worker can't start in a host page). Prompts for a label model (mindmap default). 1.0: `addColormap` + `addVolume({url: File})`; 0.6: `NVImage.new` (via `volumes[0].constructor`) + `setColormapLabel` + `addVolume`, tolerating a throwing host `onImageLoaded`. ~2.5 s on WebGPU.
+- Testing sync without the live services: stub `window.Pusher` with a BroadcastChannel relay (JSON-serialize payloads), block `workers.dev`/dropbox, open two pages, `bringToFront()` before changing each (rAF).
+- Not ported (use 0.6 internals): trako. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
 - Trap: in-place `vol.img` edits + `updateGLVolume()` silently do nothing on 1.0 (textures cached by buffer identity); set `vol.isDirty = true` or call `updateVolumeData(i)`.
 
 ## Next steps
 
-Next pass ("medium", agreed 2026-11-08):
-1. sync on 1.0: `Boostlet.slice_type()` plus a `crosshair_pos()` accessor, `setVolume(i, {colormap})` instead of `setColormap`, `change` events instead of per-frame polling, `saveVolume` bytes instead of the hand-written NIfTI writer. Needs a two-browser test.
-2. brainchop on `@brainchop/mindgrab`: a `get_nifti()` helper (1.0 `saveVolume({volumeByIndex: 0, filename: ''})`, 0.6 `saveImage`) → `segment` → `addVolume({url: new File(...)})`. Risks: `worker: true` cross-origin worker from a CDN inside a host page; WebGPU needs https; the CPU fallback needs host COOP/COEP.
+Medium pass (sync, brainchop) done 2026-11-08, pending user review/commit.
 
 Later:
 - NiiVue core (niivue-parity.md R1/R2): `canvas.niivue`, RAS voxel helpers. Then detect via `canvas.niivue` and drop `volume_data()`.

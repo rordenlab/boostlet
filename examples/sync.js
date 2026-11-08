@@ -112,7 +112,10 @@
   else loadScript(BOOSTLET_URL, waitForNv)
 
   function waitForNv() {
+    let tries = 0
     state.pollId = setInterval(() => {
+      // give up after ~30 s: each try re-runs detection, which replaces Boostlet.framework
+      if (++tries > 100) { clearInterval(state.pollId); state.pollId = null; Boostlet.hint('sync: no NiiVue viewer found', 4000); return }
       try {
         Boostlet.init()
         if (Boostlet.framework.name !== 'niivue') return
@@ -148,13 +151,13 @@
     const vol = nv.volumes?.[0]
     // index explicitly, after loadDocument crosshairPos is a plain object
     // like {0: .5, 1: .5, 2: .5} and Array.from would turn it into []
-    const pos = nv.scene?.crosshairPos
+    const pos = Boostlet.framework.crosshair_pos()
     const snap = {
       crosshairPos: pos ? [0, 1, 2].map(i => pos[i]) : [0.5, 0.5, 0.5],
-      sliceType: nv.opts?.sliceType ?? 0,
+      sliceType: Boostlet.slice_type() ?? 0,
       colormap: vol?.colormap ?? null,
-      cal_min: vol?.cal_min ?? null,
-      cal_max: vol?.cal_max ?? null
+      cal_min: vol?.cal_min ?? vol?.calMin ?? null, // 0.6 ?? 1.0
+      cal_max: vol?.cal_max ?? vol?.calMax ?? null
     }
     if (!full) return snap
     return {
@@ -167,16 +170,26 @@
 
   function applyDiff(diff) {
     const nv = state.nv
+    const v1 = Boostlet.framework.v1
     // an empty or partial crosshair blanks every slice, so ignore it
     if (diff.crosshairPos?.length === 3 && diff.crosshairPos.every(Number.isFinite)) {
-      nv.scene.crosshairPos = new Float32Array(diff.crosshairPos)
-      nv.drawScene?.()
-      // so other boostlets see the move
-      nv.createOnLocationChange?.()
+      const pos = new Float32Array(diff.crosshairPos)
+      // 1.0's setter redraws and emits locationChange (so other boostlets see the move)
+      if (v1) nv.crosshairPos = pos
+      else { nv.scene.crosshairPos = pos; nv.drawScene(); nv.createOnLocationChange() }
     }
-    if (diff.sliceType !== undefined && nv.opts.sliceType !== diff.sliceType) nv.setSliceType?.(diff.sliceType)
+    if (diff.sliceType !== undefined && Boostlet.slice_type() !== diff.sliceType) {
+      if (v1) nv.sliceType = diff.sliceType
+      else nv.setSliceType(diff.sliceType)
+    }
     const vol = nv.volumes?.[0]
-    if (vol) {
+    if (vol && v1) {
+      const update = {}
+      if (diff.colormap && diff.colormap !== vol.colormap) update.colormap = diff.colormap
+      if (diff.cal_min != null) update.calMin = diff.cal_min
+      if (diff.cal_max != null) update.calMax = diff.cal_max
+      if (Object.keys(update).length) nv.setVolume(0, update)
+    } else if (vol) {
       let dirty = false
       if (diff.colormap && diff.colormap !== vol.colormap) { nv.setColormap?.(vol.id, diff.colormap); dirty = true }
       if (diff.cal_min != null) { vol.cal_min = diff.cal_min; dirty = true }
@@ -323,13 +336,9 @@
     const vol = state.nv.volumes?.[0]
     if (!vol?.img) { Boostlet.hint('no volume to upload', 3000); return }
 
-    const nifti = buildNifti1({
-      dims: Array.from(vol.hdr.dims), pixDims: Array.from(vol.hdr.pixDims),
-      datatypeCode: vol.hdr.datatypeCode, numBitsPerVoxel: vol.hdr.numBitsPerVoxel,
-      scl_slope: vol.hdr.scl_slope, scl_inter: vol.hdr.scl_inter,
-      sform_code: vol.hdr.sform_code, qform_code: vol.hdr.qform_code,
-      affine: vol.hdr.affine
-    }, vol.img)
+    // NiiVue writes the NIfTI itself (full header), 1.0 saveVolume / 0.6 saveImage
+    const nv = state.nv
+    const nifti = await (Boostlet.framework.v1 ? nv.saveVolume({ volumeByIndex: 0, filename: '' }) : nv.saveImage({ filename: '', volumeByIndex: 0 }))
 
     Boostlet.hint('uploading to dropbox', 3000)
     const url = await dropboxUpload('/volume_' + Date.now() + '.nii', nifti)
@@ -385,33 +394,6 @@
       state.dropboxToken = data.access_token
       return state.dropboxToken
     } catch (e) { Boostlet.hint('dropbox auth failed', 4000); return null }
-  }
-
-  // ===== nifti builder =====
-
-  function buildNifti1(meta, voxelData) {
-    const hdr = new ArrayBuffer(352)
-    const d = new DataView(hdr)
-    d.setInt32(0, 348, true)
-    for (let i = 0; i < 8; i++) d.setInt16(40 + i * 2, meta.dims[i] || 0, true)
-    d.setInt16(70, meta.datatypeCode || 16, true)
-    d.setInt16(72, meta.numBitsPerVoxel || 32, true)
-    for (let i = 0; i < 8; i++) d.setFloat32(76 + i * 4, meta.pixDims[i] || 1, true)
-    d.setFloat32(108, 352, true)
-    d.setFloat32(112, meta.scl_slope || 1, true)
-    d.setFloat32(116, meta.scl_inter || 0, true)
-    d.setInt16(252, meta.qform_code || 1, true)
-    d.setInt16(254, meta.sform_code || 1, true)
-    if (meta.affine) {
-      let k = 0
-      for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) d.setFloat32(280 + (k++) * 4, meta.affine[i][j] || 0, true)
-    }
-    const bytes = new Uint8Array(hdr)
-    bytes[344] = 110; bytes[345] = 43; bytes[346] = 49; bytes[347] = 0
-    const out = new Uint8Array(352 + voxelData.byteLength)
-    out.set(bytes)
-    out.set(new Uint8Array(voxelData.buffer, voxelData.byteOffset, voxelData.byteLength), 352)
-    return out
   }
 
   // ===== pusher + webrtc =====

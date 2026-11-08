@@ -84,7 +84,7 @@ All methods are on the global `Boostlet`.
 - XTK
 - Any other page: falls back to the largest `<canvas>`.
 
-NiiVue is detected on `window` (e.g. `window.nv`) or from a `<niivue-viewer>`/`<niivue-scene>` web component. Other ES module pages, typical for NiiVue 1.0, keep the instance private; pass it explicitly with `Boostlet.init('niivue', nv)`. brainchop, sync and trako still use NiiVue 0.6 internals and do not yet work on 1.0.
+NiiVue is detected on `window` (e.g. `window.nv`) or from a `<niivue-viewer>`/`<niivue-scene>` web component. Other ES module pages, typical for NiiVue 1.0, keep the instance private; pass it explicitly with `Boostlet.init('niivue', nv)`. trako still uses NiiVue 0.6 internals and does not yet work on 1.0.
 
 ## Developer Instructions
 
