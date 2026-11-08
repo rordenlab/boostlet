@@ -110,3 +110,39 @@ No problems were found in `volume_data`, the `Boostlet.init('niivue', nv)` path,
 - 0.6 `sobel` 3.23%, `plotly` 0.17%, `subvolume` 0.05%, `pixelexplorer` 2.45%, `roistats` 0.23%: all pass.
 - At HEAD on this Mac, the 0.6 pages using the production build didn't even load their volume headlessly. Their byte-exact mismatch is environmental (the ground truths come from CI).
 - Behaviour checks: on 1.0, roiStats updates on crosshair moves, the dirty-flag refresh works, and web-component detection works; on 0.6, PixelExplorer and roiStats work with the local build.
+
+## Audit 3 (external review of sync/brainchop, `ba9f65c`)
+
+No actionable findings. Its noted gaps:
+- Live Pusher/WebRTC, Dropbox and remote scene publication are untested. That is deliberate: the services belong to a contributor, and local tests stub them.
+- rAF polling pauses in background tabs. Known; switching to 1.0's change events is an optional optimization.
+- brainchop was tested with one volume, one model and WebGPU only.
+Accepted as documented. `audit_temp.md` deleted.
+
+## Audit 4 (external review of trako/imageCaptioning, before commit)
+
+| Sev | Finding | Response |
+|---|---|---|
+| P2 | The new captioning URL serves no model: BLIP has no inference provider (`inferenceProviderMapping: {}`). My earlier 401 check only proved the endpoint wanted a token. | **Fixed.** HF router `v1/chat/completions` with `google/gemma-4-31B-it` (image-text-to-text, live conversational providers: novita, featherless-ai, deepinfra). The image goes as a PNG data URL, and the caption is read from `choices[0].message.content`. Not run against the live API (needs a token); the request was verified against a stub. |
+| P2 | Switching to `get_image()` sent raw Cornerstone voxels (wrapped to 8 bits) instead of the displayed image | **Fixed.** Canvas RGBA via `get_image(true)` everywhere, except NiiVue, where `get_image(true)` means raw voxels, so grayscale `get_image()` is expanded instead. With a stubbed endpoint, the PNG equals the view on both 0.6 and 1.0 (same size and mean). |
+
+Agents:
+- trako `fibersToTck` now writes a preallocated `Float32Array`: byte-identical output, about 3.5× faster on 20k × 60 points.
+- The drop handler takes one file, awaits the load and reports errors, so there's no double `removeChild` or unhandled rejection; `fibers` is no longer a global; debug logs removed.
+- Docs: the leading-NaN workaround stays while 0.6 is supported; added the deployment caveat.
+- Accepted: the TCK `count:` excludes the empty leading streamline (NiiVue ignores it), and a new streamline starting exactly on the previous end would be merged with it.
+- Unrelated: niivue/mono#623's Playwright jobs fail on GitHub's ubuntu26.04 runner (`chromium-headless-shell` unsupported), repo-wide; its Lint/Typecheck/Test passed.
+
+## Audit 5 (external review of the audit 4 fixes)
+
+No new findings. The reviewer re-ran both audit 4 reproductions:
+- Captioning PNG has 0 pixel differences on Cornerstone, NiiVue 1.0 and 0.6 (including 0.6's flip).
+- Stubbed success and error responses display correctly.
+- trako loads the TRAKO sample on both versions.
+- The preallocated writer is byte-identical (534,928-byte TCK).
+- Malformed TKO shows an error and keeps the drop zone.
+
+Still open: an authenticated captioning run. `audit_temp.md` deleted.
+- Agents (audit 5):
+  - Fixed: the captioning prompt now says the view is sent to Hugging Face and its providers; cancelling skips the request; network and non-JSON errors are shown instead of only logged.
+  - Declined: `btoa(String.fromCharCode(...png))` instead of FileReader, because spreading a canvas-sized PNG (>100 KB) exceeds the argument limit.

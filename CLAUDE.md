@@ -50,24 +50,28 @@ Bookmarklet runtime: `window.Boostlet` gives examples one API over several web v
 - sync (both versions): reads via `Boostlet.framework.crosshair_pos()` / `Boostlet.slice_type()` / `cal_min ?? calMin`; 1.0 writes via `nv.crosshairPos =`, `nv.sliceType =`, `nv.setVolume(0, {colormap, calMin, calMax})`; uploads use NiiVue's own NIfTI (`saveVolume` / 0.6 `saveImage`, `filename: ''`). Change detection is still per-frame `requestAnimationFrame` polling (one path for both versions; paused in background tabs). Detection poll gives up after ~30 s.
 - brainchop (both versions): `brainchop_runner.js` uses `@brainchop/mindgrab` from jsdelivr (`segment`, `worker: false` since a CDN module worker can't start in a host page). Prompts for a label model (mindmap default). 1.0: `addColormap` + `addVolume({url: File})`; 0.6: `NVImage.new` (via `volumes[0].constructor`) + `setColormapLabel` + `addVolume`, tolerating a throwing host `onImageLoaded`. ~2.5 s on WebGPU.
 - Testing sync without the live services: stub `window.Pusher` with a BroadcastChannel relay (JSON-serialize payloads), block `workers.dev`/dropbox, open two pages, `bringToFront()` before changing each (rAF).
-- Not ported (use 0.6 internals): trako. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
+- trako (both versions): decoded TKO line segments are joined into streamlines and written as an in-memory MRtrix `.tck` (`fibersToTck`), loaded via 1.0 `addMesh({url: File})` / 0.6 `loadFromArrayBuffer`. A leading NaN triplet works around a NiiVue TCK reader bug (0.6 and 1.0rc drop the first streamline; see niivue-parity.md).
+- imageCaptioning: HF router `v1/chat/completions` with `google/gemma-4-31B-it` (BLIP has no inference provider); image is a PNG data URL of the view: canvas RGBA via `get_image(true)`, except NiiVue `get_image()` grayscale (raw-voxel contract). Token prompted at run time. Request/PNG verified with a stubbed endpoint on 0.6 and 1.0 (PNG = view exactly); never run against the live API (needs a token).
+- Every example supports NiiVue 0.6 and 1.0. Examples load boostlet.org's dist, so the 1.0 paths are live only after this branch is deployed. Per-API mapping: `/Users/chris/dcm/niivue-parity.md`.
 - Trap: in-place `vol.img` edits + `updateGLVolume()` silently do nothing on 1.0 (textures cached by buffer identity); set `vol.isDirty = true` or call `updateVolumeData(i)`.
 
 ## Next steps
 
-Medium pass (sync, brainchop) done 2026-11-08, pending user review/commit.
+Medium pass (sync, brainchop) committed ba9f65c. Final pass (trako, imageCaptioning) done 2026-11-08 incl. audit 4–5 fixes, committed.
 
 Later:
 - NiiVue core (niivue-parity.md R1/R2): `canvas.niivue`, RAS voxel helpers. Then detect via `canvas.niivue` and drop `volume_data()`.
-- trako (0.6 mesh template + `window.niivue`); imageCaptioning on NiiVue (blocked on the `get_image(true)` decision).
+- NiiVue TCK reader fix: niivue/mono#623 (open). Keep trako's leading-NaN workaround while 0.6 is supported (0.6's reader won't be fixed); it is harmless on the fixed 1.0 reader. PR CI: the Playwright jobs fail on GitHub's ubuntu26.04 runner image (`chromium-headless-shell` unsupported), repo-wide, unrelated to the change; Lint/Typecheck/Test passed.
 - Audit open items below.
 
 ## Audit notes
 
 2026-11-08 audit (details: `audit_response.md`):
 - Fixed: 1.0 bounded-view round trip; leaked HF token removed from `examples/imageCaptioning.js` (still in history from `3f50bf3` → owner must revoke); dead Segment Anything example (backend 404) removed; small dead-code cleanups.
-- Open, needs maintainer decision: `get_image(true)` means raw voxels on NiiVue but canvas RGBA elsewhere (breaks imageCaptioning on NiiVue); NiiVue `set_mask` throws since `63b4da3` (fix vs delete mask/box/BoxCraft path); unify adapters on CanvasFallback; `Util.filter` OOB reads (benchmark first); package.json dep hygiene; stale `server/package.json`, `tests/dev.html`.
+- Open, needs maintainer decision: `get_image(true)` means raw voxels on NiiVue but canvas RGBA elsewhere (imageCaptioning works around it); NiiVue `set_mask` throws since `63b4da3` (fix vs delete mask/box/BoxCraft path); unify adapters on CanvasFallback; `Util.filter` OOB reads (benchmark first); package.json dep hygiene; stale `server/package.json`, `tests/dev.html`.
 - Never commit API tokens in examples; ask at run time (don't store: bookmarklet storage belongs to the host page).
 - Security pass fixed client side (sync URL and protocol checks, OAuth popup check, numpy remote-run, boostlet URL allowlist, `global` hack, `hint` textContent). Open: server `/scene` validation and limits, Pusher auth channel/user_id, infrastructure on a contributor's accounts, Dropbox privacy. Treat sync scene JSON and peer messages as untrusted.
 - 2026-11-08 audit 2: external review of easy fixes had no actionable findings
 - 2026-11-08 audit 2 agents: fixed numpy `refreshVolume` scope (Undo threw), NiiVue test pages now test the local build (were testing production, which lacks `on_location`), multiplanar uses the clicked tile (`loc.axCorSag`), slab code trimmed, meshAR colour in 0–1, fibersAR no longer copies `trx.vertices`. Not done (YAGNI): `on_location` unsubscribe; detection only checks the first default-named web component; numpy bench timings don't await 1.0's async `updateGLVolume`.
+- 2026-11-08 audit 4: external review found HF BLIP undeployed and Cornerstone raw-pixel regression in imageCaptioning: fixed (chat-completions vision model; canvas RGBA except NiiVue). Agents: trako `fibersToTck` writes a preallocated Float32Array (~3.5× faster, byte-identical), drop handler takes one file, awaits the load and reports errors; docs fixed (workaround stays for 0.6, deployment caveat).
+- 2026-11-08 audit 5: external review found no new issues; final pass committed.
