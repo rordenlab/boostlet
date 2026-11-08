@@ -3,6 +3,29 @@ import {Framework} from '../framework.js';
 import {Util} from '../util.js';
 import {CanvasFallback} from './canvasFallback.js';
 
+// Raw voxels in RAS voxel coords, end inclusive and both clamped to the volume.
+// Port of 0.6 NVImage.getVolumeData (removed in 1.0); the fields it reads exist in both.
+function volume_data(v, start, end) {
+  const d = v.dimsRAS, o = v.img2RASstart, step = v.img2RASstep, img = v.img;
+  const lo = [], hi = [];
+  for (let i = 0; i < 3; i++) {
+    const a = Math.max(0, Math.min(Math.round(start[i]), d[i + 1] - 1));
+    const b = Math.max(0, Math.min(Math.round(end[i]), d[i + 1] - 1));
+    lo[i] = Math.min(a, b);
+    hi[i] = Math.max(a, b);
+  }
+  const dims = [hi[0] - lo[0] + 1, hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
+  const out = new img.constructor(dims[0] * dims[1] * dims[2]);
+  let n = 0;
+  for (let z = lo[2]; z <= hi[2]; z++) {
+    for (let y = lo[1]; y <= hi[1]; y++) {
+      const yz = o[0] + o[1] + o[2] + y * step[1] + z * step[2];
+      for (let x = lo[0]; x <= hi[0]; x++) out[n++] = img[yz + x * step[0]];
+    }
+  }
+  return [out, dims];
+}
+
 export class NiiVue extends Framework {
   
   constructor(instance) {
@@ -11,7 +34,9 @@ export class NiiVue extends Framework {
     this.name = 'niivue';
     this.canvasFallback = new CanvasFallback();
 
-    this.flip_on_png = true;
+    // NiiVue 1.0 has getCanvasImage; 0.6 is read back with gl.readPixels (bottom-up)
+    this.v1 = typeof instance.getCanvasImage === 'function';
+    this.flip_on_png = !this.v1;
 
     this.onMouseDown = false;
     this.x1 = null;
@@ -21,125 +46,83 @@ export class NiiVue extends Framework {
 
   }
 
+  // 0.6 and 1.0 differ only in where these live
+  slice_type() {
+    return this.v1 ? this.instance.sliceType : this.instance.opts.sliceType;
+  }
+
+  crosshair_pos() {
+    return this.v1 ? this.instance.crosshairPos : this.instance.scene.crosshairPos;
+  }
+
   get_image(from_canvas) {
 
-    
-    let pixels = null;
-    let width = null;
-    let height = null;
+    if (Util.is_defined(from_canvas)) {
 
-    if (!Util.is_defined(from_canvas)) {
-
-      // use the canvas
-
-      let element = this.instance.canvas;
-
-      let old_crosshaircolor = this.instance.opts.crosshairColor;
-      let old_crosshairwidth = this.instance.opts.crosshairWidth;
-
-      this.instance.setCrosshairColor([0,0,0,0]);
-      this.instance.opts.crosshairWidth=0;
-      this.instance.updateGLVolume();
-
-
-      let ctx = this.instance.gl;
-
-      
-      width = ctx.drawingBufferWidth;
-      height = ctx.drawingBufferHeight;
-
-      pixels = new Uint8Array(width * height * 4);
-      ctx.readPixels(
-        0, 
-        0, 
-        width, 
-        height, 
-        ctx.RGBA, 
-        ctx.UNSIGNED_BYTE, 
-        pixels);
-
-      // restore crosshairs
-      this.instance.setCrosshairColor(old_crosshaircolor);
-      this.instance.opts.crosshairWidth = old_crosshairwidth;
-
-
-      // convert rgba pixels to grayscale
-      pixels = Util.rgba_to_grayscale(pixels);
-
-
-    } else {
-
-      // grab the real pixels of the current slice and return it
-      // set width and height accordingly
-
-      let v =  this.instance.volumes[0];
-      let currentSlice = this.instance.opts.sliceType;
-      let currentCrossHairPos = this.instance.scene.crosshairPos;
-      
-      
-      // Default to full volume
-      let start = [0, 0, 0];
-      let end = [v.dims[1], v.dims[2], v.dims[3]];
-
-      if(currentSlice == 0){
-        // axial, slice along Z
-        let z_index = Math.floor(currentCrossHairPos[2] * v.dims[3]);
-        width = v.dims[1];
-        height = v.dims[2];
-        start = [0, 0, z_index];
-        end = [v.dims[1], v.dims[2], z_index + 1];
+      // raw voxels of the current slice; multiplanar/render returns the full volume
+      const v = this.instance.volumes[0];
+      const d = v.dimsRAS;
+      const st = this.slice_type();
+      const start = [0, 0, 0];
+      const end = [d[1] - 1, d[2] - 1, d[3] - 1];
+      const axis = [2, 1, 0][st]; // axial slices z, coronal y, sagittal x
+      if (axis !== undefined) {
+        start[axis] = end[axis] = Math.floor(this.crosshair_pos()[axis] * d[axis + 1]);
       }
-      else if(currentSlice == 1){
-        // coronal, slice along Y
-        let y_index = Math.floor(currentCrossHairPos[1] * v.dims[2]);
-        width = v.dims[1];
-        height = v.dims[3];
-        start = [0, y_index, 0];
-        end = [v.dims[1], y_index + 1 , v.dims[3]];
-      }
-      else if(currentSlice == 2){
-        // sagittal, slice along X
-        let x_index = Math.floor(currentCrossHairPos[0] * v.dims[1]);
-        width = v.dims[2];
-        height = v.dims[3];
-        start = [x_index, 0, 0];
-        end = [x_index + 1, v.dims[2], v.dims[3]];
-      }
-      else {
-        // multiplanar (sliceType 3), no single slice to extract,
-        // return the full volume
-        width = v.dims[1];
-        height = v.dims[2];
-      }
-
-      pixels = v.getVolumeData(start, end)[0];
+      const [data, dims] = volume_data(v, start, end);
+      const [width, height] = st == 1 ? [dims[0], dims[2]] : st == 2 ? [dims[1], dims[2]] : [dims[0], dims[1]];
+      return {'data': data, 'width': width, 'height': height};
 
     }
 
-    return {'data':pixels, 'width':width, 'height':height};
+    const nv = this.instance;
+
+    if (this.v1) {
+
+      // getCanvasImage renders and copies in one task (WebGL2 and WebGPU), top-left origin
+      const old_width = nv.crosshairWidth;
+      nv.crosshairWidth = 0;
+      const image = nv.getCanvasImage();
+      nv.crosshairWidth = old_width;
+      if (!image) throw "NiiVue could not capture the canvas.";
+      return {'data': Util.rgba_to_grayscale(image.data), 'width': image.width, 'height': image.height};
+
+    }
+
+    let old_crosshaircolor = nv.opts.crosshairColor;
+    let old_crosshairwidth = nv.opts.crosshairWidth;
+
+    nv.setCrosshairColor([0,0,0,0]);
+    nv.opts.crosshairWidth=0;
+    nv.updateGLVolume();
+
+    let ctx = nv.gl;
+    let width = ctx.drawingBufferWidth;
+    let height = ctx.drawingBufferHeight;
+
+    let pixels = new Uint8Array(width * height * 4);
+    ctx.readPixels(0, 0, width, height, ctx.RGBA, ctx.UNSIGNED_BYTE, pixels);
+
+    // restore crosshairs
+    nv.setCrosshairColor(old_crosshaircolor);
+    nv.opts.crosshairWidth = old_crosshairwidth;
+
+    return {'data': Util.rgba_to_grayscale(pixels), 'width': width, 'height': height};
 
   }
 
-
-
   get_subvolume(start, end) {
-    const v = this.instance.volumes[0];
-    // getVolumeData returns nothing if a coord is negative
-    const last = [v.dims[1] - 1, v.dims[2] - 1, v.dims[3] - 1];
-    const clamp = (p, i) => Math.min(Math.max(0, Math.round(p)), last[i]);
-    const [data, dims] = v.getVolumeData(start.map(clamp), end.map(clamp));
+    const [data, dims] = volume_data(this.instance.volumes[0], start, end);
     return { data, dims };
   }
 
   get_dims(){
-    const v = this.instance.volumes[0];
-    const currentSlice = this.instance.opts.sliceType;
-
-    if(currentSlice == 0) return [v.dims[1], v.dims[2], 1]; //axial
-    if(currentSlice == 1 ) return [v.dims[1], v.dims[3], 1 ]; // coronal
-    if(currentSlice == 2) return [v.dims[2], v.dims[3], 1 ]; // saggital
-    return [v.dims[1], v.dims[2], 1]; // multiplanar fallback
-  }  
+    const d = this.instance.volumes[0].dimsRAS;
+    const st = this.slice_type();
+    if (st == 1) return [d[1], d[3], 1]; // coronal
+    if (st == 2) return [d[2], d[3], 1]; // sagittal
+    return [d[1], d[2], 1]; // axial, multiplanar fallback
+  }
 
   /**
    * Sets the NiiVue.js image.
@@ -178,12 +161,13 @@ export class NiiVue extends Framework {
 
     let new_pixels_clamped = new Uint8ClampedArray(new_pixels_rgba);
 
+    // ponytail: assumes pixels span the whole canvas; a 1.0 capture is smaller if nv.bounds splits the canvas
     let new_image_data = new ImageData(new_pixels_clamped, newcanvas.width, newcanvas.height);
     
 
     ctx.putImageData(new_image_data, 0, 0);
 
-    if (!Util.is_defined(no_flip)) {
+    if (!Util.is_defined(no_flip) && !this.v1) {
       // some flipping action
       ctx.save();
       ctx.scale(1, -1);

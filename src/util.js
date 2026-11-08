@@ -13,6 +13,7 @@ export class Util {
   static looks_like_niivue(obj) {
     if (!obj || typeof obj !== 'object') return false
     if (!Array.isArray(obj.volumes)) return false
+    if (typeof obj.getCanvasImage === 'function') return true // NiiVue 1.0
     if (!obj.scene || typeof obj.scene !== 'object') return false
     if (!obj.opts || obj.opts.sliceType === undefined) return false
     if (typeof obj.updateGLVolume !== 'function') return false

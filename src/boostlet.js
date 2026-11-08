@@ -1,4 +1,5 @@
 import {Util} from './util.js';
+import {NiiVue} from './frameworks/niivue.js';
 
 export class Boostlet {
 
@@ -20,9 +21,9 @@ export class Boostlet {
 
     if (typeof name != 'undefined' && typeof instance != 'undefined') {
 
-      console.log('Framework forced by user!');
-      throw "Forced Framework Not Implemented.";
-      // TODO
+      // ES module pages (e.g. NiiVue 1.0) keep the instance off window: Boostlet.init('niivue', nv)
+      if (name !== 'niivue') throw "Forced Framework Not Implemented.";
+      this.framework = new NiiVue(instance);
 
     } else {
 

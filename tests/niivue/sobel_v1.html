@@ -1,0 +1,26 @@
+<html>
+  <head>
+    <title>Boostlet NiiVue 1.0</title>
+    <style>body{margin:0;background:#000} canvas{width:100vw;height:100vh;display:block}</style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <script type="module">
+      import NiiVue from 'https://cdn.jsdelivr.net/npm/@niivue/niivue@1.0.0-rc.118/dist/standalone/niivue.js'
+      const nv = new NiiVue({ sliceType: 0 })
+      await nv.attachToCanvas(document.getElementById('gl'))
+      await nv.loadVolumes([{ url: 'data/avf.nii.gz' }])
+      window.nv = nv // boostlet detects window.nv; or pass it: Boostlet.init('niivue', nv)
+      const script = document.createElement('script')
+      script.src = '/dist/boostlet.min.js'
+      script.onload = () => {
+        Boostlet.init()
+        const image = Boostlet.get_image()
+        const filtered = Boostlet.filter(image.data, image.width, image.height, [-1, 0, 1, -2, 0, 2, -1, 0, 1])
+        Boostlet.set_image(filtered)
+        window.TESTCOMPLETED = true
+      }
+      document.head.appendChild(script)
+    </script>
+  </body>
+</html>

@@ -20,6 +20,7 @@
     "local": {
       "Niivue" : {
         "sobel": "http://127.0.0.1:5501/tests/niivue/sobel.html",
+        "sobel_v1": "http://127.0.0.1:5501/tests/niivue/sobel_v1.html",
         "plotly" : "http://127.0.0.1:5501/tests/niivue/plotly.html",
         "segmentanything" : "http://127.0.0.1:5501/tests/niivue/segmentanything.html",
         "subvolume" : "http://127.0.0.1:5501/tests/niivue/subvolume.html",

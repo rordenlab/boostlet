@@ -67,8 +67,10 @@ During development, to prototype in the JS Console, there are two entrypoints:
 ## Supported Libraries
 
 Cornerstone2D.js
-NiiVue.js
+NiiVue.js (0.6x and 1.0rc)
 OpenSeaDragon.js
+
+NiiVue is detected on `window` (e.g. `window.nv`). ES module pages, typical for NiiVue 1.0, keep the instance off `window`; pass it explicitly with `Boostlet.init('niivue', nv)`.
 
 ## Contributing
 
