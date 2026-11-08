@@ -38,12 +38,6 @@ export class NiiVue extends Framework {
     this.v1 = typeof instance.getCanvasImage === 'function';
     this.flip_on_png = !this.v1;
 
-    this.onMouseDown = false;
-    this.x1 = null;
-    this.y1 = null;
-    this.x2 = null;
-    this.y2 = null;
-
   }
 
   // 0.6 and 1.0 differ only in where these live
@@ -85,6 +79,8 @@ export class NiiVue extends Framework {
       const image = nv.getCanvasImage();
       nv.crosshairWidth = old_width;
       if (!image) throw "NiiVue could not capture the canvas.";
+      // the capture covers only this instance's bounds; remember where so set_image can put it back
+      this.capture = {x: Math.max(0, nv.view.boundsOffsetX), y: Math.max(0, nv.view.boundsOffsetY), width: image.width, height: image.height};
       return {'data': Util.rgba_to_grayscale(image.data), 'width': image.width, 'height': image.height};
 
     }
@@ -161,11 +157,8 @@ export class NiiVue extends Framework {
 
     let new_pixels_clamped = new Uint8ClampedArray(new_pixels_rgba);
 
-    // ponytail: assumes pixels span the whole canvas; a 1.0 capture is smaller if nv.bounds splits the canvas
-    let new_image_data = new ImageData(new_pixels_clamped, newcanvas.width, newcanvas.height);
-    
-
-    ctx.putImageData(new_image_data, 0, 0);
+    const rect = (this.v1 && this.capture) || {x: 0, y: 0, width: newcanvas.width, height: newcanvas.height};
+    ctx.putImageData(new ImageData(new_pixels_clamped, rect.width, rect.height), rect.x, rect.y);
 
     if (!Util.is_defined(no_flip) && !this.v1) {
       // some flipping action

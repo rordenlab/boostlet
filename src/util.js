@@ -114,7 +114,6 @@ export class Util {
     }
 
     window.document.head.appendChild(script);
-    eval(script);
 
   }
 
@@ -146,13 +145,7 @@ export class Util {
     let offscreen_ctx = offscreen.getContext('2d');
 
     let imgdata = offscreen_ctx.createImageData(offscreen.width, offscreen.height);
-    let pxdata = imgdata.data;
-
-    for (var i =0; i<pxdata.length;i++) {
-        
-      pxdata[i] = uint8array[i];
-
-    }
+    imgdata.data.set(uint8array);
       // update canvas with new data
     offscreen_ctx.putImageData(imgdata, 0, 0);
     

@@ -9,7 +9,7 @@ document.head.appendChild(script);
 eval(script);
 
 const API_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
-const API_TOKEN = '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'
+let API_TOKEN = null // asked at run time; never commit a token
 
 async function run() {
 
@@ -26,6 +26,8 @@ async function run() {
 }
 
 async function request() {
+
+  API_TOKEN = API_TOKEN || prompt('Hugging Face access token (huggingface.co/settings/tokens)');
 
   image = Boostlet.get_image(true); // grab image from canvas
   pixels = image.data;

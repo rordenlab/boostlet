@@ -10,6 +10,9 @@
       const nv = new NiiVue({ sliceType: 0 })
       await nv.attachToCanvas(document.getElementById('gl'))
       await nv.loadVolumes([{ url: 'data/avf.nii.gz' }])
+      // ?bounds=x0,y0,x1,y1 draws NiiVue in part of the canvas (get_image/set_image round trip)
+      const bounds = new URLSearchParams(location.search).get('bounds')
+      if (bounds) nv.setBounds(bounds.split(',').map(Number))
       window.nv = nv // boostlet detects window.nv; or pass it: Boostlet.init('niivue', nv)
       const script = document.createElement('script')
       script.src = '/dist/boostlet.min.js'
